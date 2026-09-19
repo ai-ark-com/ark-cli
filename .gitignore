@@ -1,0 +1,26 @@
+# Binaries
+/ark
+/ark.exe
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Never commit local secrets or scratch request bodies
+.env
+.env.*
+*.token
+/tmp/
+
+# Local API token for live tests (never committed)
+/SECRET
+
+# Local assistant notes (never committed)
+/CLAUDE.md

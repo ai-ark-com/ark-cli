@@ -1,0 +1,86 @@
+# golangci-lint v2 configuration. Run with `make lint` (Docker) or
+# `golangci-lint run` when the tool is installed locally.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - noctx
+    - nilerr
+    - durationcheck
+    - makezero
+    # security
+    - gosec
+    # style and simplicity
+    - gocritic
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+    - prealloc
+    - nolintlint
+    - usestdlibvars
+    - perfsprint
+    - intrange
+    - gocognit
+    - nestif
+  settings:
+    gocognit:
+      min-complexity: 30
+    nestif:
+      min-complexity: 6
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - unnamedResult
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: unused-parameter
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: early-return
+    gosec:
+      excludes:
+        - G304 # file inclusion via variable: --body / --from-file are the user's own paths, reviewed inline
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ai-ark-com/ark-cli

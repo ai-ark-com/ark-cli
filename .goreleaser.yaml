@@ -1,0 +1,65 @@
+# GoReleaser builds cross-platform binaries and publishes them on tag push.
+# See .github/workflows/release.yml for the CI trigger.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ark
+    main: .
+    binary: ark
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: ark
+    name_template: >-
+      ark_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Homebrew and Scoop publishing are ready to enable once the tap/bucket repos
+# exist under the org; uncomment and set the repository owner then.
+#
+# brews:
+#   - name: ark
+#     repository:
+#       owner: ai-ark-com
+#       name: homebrew-tap
+#     homepage: "https://ai-ark.com"
+#     description: "AI-Ark command-line interface"
+#
+# scoops:
+#   - repository:
+#       owner: ai-ark-com
+#       name: scoop-bucket
+#     homepage: "https://ai-ark.com"
+#     description: "AI-Ark command-line interface"

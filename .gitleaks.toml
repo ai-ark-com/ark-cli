@@ -1,0 +1,20 @@
+# gitleaks configuration: the default rule set plus the AI-Ark token header.
+title = "ark-cli"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ark-api-token-assignment"
+description = "AI-Ark API token assigned in code or config"
+regex = '''(?i)(ARK_API_TOKEN|X-TOKEN|x_token|arkToken)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{20,}'''
+
+[allowlist]
+description = "Test fixtures and documentation placeholders"
+regexes = [
+  '''secret-token''',
+  '''YOUR_API_KEY''',
+]
+paths = [
+  '''go\.sum''',
+]
