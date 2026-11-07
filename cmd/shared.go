@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -87,24 +88,48 @@ func call(cmd *cobra.Command, build BuildInfo, out *outputFlags, fn func(*client
 	return present(cmd, res, opts)
 }
 
-// present renders a result. For the human-readable formats a summary line
-// (total matches, credits used) goes to stderr, so stdout stays pipeable.
+// present renders a result. For the human-readable formats a summary
+// (total matches, credits used, request limits) goes to stderr, so stdout
+// stays pipeable.
 func present(cmd *cobra.Command, res *client.Result, opts output.Options) error {
 	total, err := output.Render(cmd.OutOrStdout(), res.Body, opts)
 	if err != nil || opts.Format == output.JSON {
 		return err
 	}
-	var summary []string
+	var counts []string
 	if total >= 0 {
-		summary = append(summary, fmt.Sprintf("%d total matches", total))
+		counts = append(counts, fmt.Sprintf("%d total matches", total))
 	}
-	if res.Credit != "" {
-		summary = append(summary, strings.TrimPrefix(res.Credit, "-")+" credits used")
+	counts = append(counts, creditsUsed(res.Credit)+" credits used")
+	summary := []string{strings.Join(counts, ", ")}
+	if limits := limitSummary(res.Limits); limits != "" {
+		summary = append(summary, "limits: "+limits)
 	}
-	if len(summary) > 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), "\n"+strings.Join(summary, ", "))
-	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "\n"+strings.Join(summary, "\n"))
 	return nil
+}
+
+// creditsUsed turns the X-Credit header ("-0.5") into the amount charged.
+// The API sends no header when a call is not charged: a plan that is not
+// billed per request, a free call, or nothing delivered.
+func creditsUsed(header string) string {
+	if header == "" {
+		return "0"
+	}
+	return strings.TrimPrefix(header, "-")
+}
+
+// limitSummary lists the request limits worth showing after a call. A
+// per-second window starts over before the next command can run, so it says
+// nothing useful and is left out.
+func limitSummary(limits []client.Limit) string {
+	var shown []string
+	for _, l := range limits {
+		if l.Window >= time.Minute {
+			shown = append(shown, l.String())
+		}
+	}
+	return strings.Join(shown, "; ")
 }
 
 // printJSON writes v as indented JSON to the command's stdout.

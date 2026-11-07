@@ -22,15 +22,17 @@ func newCatalogCmd(build BuildInfo) *cobra.Command {
 		Use:   "catalog [name]",
 		Short: "List the values a filter accepts (free)",
 		Long: `Allowed values of the search filters. Without a name, lists the catalogs.
-Industries, technologies and departments are downloaded from ai-ark.com;
-the rest are fixed by the API.
+Industries, technologies, departments and the job post industries and
+technologies are downloaded from ai-ark.com; the rest are fixed by the API.
 
 Examples:
   ark catalog
   ark catalog seniority
   ark catalog industries --search health
   ark catalog technologies --search crm --limit 20
-  ark catalog departments -o json`,
+  ark catalog departments -o json
+  ark catalog mail-platforms
+  ark catalog job-technologies --search payroll --limit 20`,
 		Args: cobra.MaximumNArgs(1),
 		ValidArgsFunction: func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			names := make([]string, 0, len(catalog.All()))

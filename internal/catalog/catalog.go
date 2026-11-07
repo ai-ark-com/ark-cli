@@ -1,10 +1,10 @@
 // Package catalog exposes the vocabularies the search filters accept.
 //
 // Small enumerations (seniority levels, company types, ...) are fixed in the
-// API and embedded here. The three large vocabularies (industries,
-// technologies, departments and functions) are published by AI-Ark as CSV
-// files and are downloaded on demand; they carry no authentication because
-// they are public.
+// API and embedded here. The large vocabularies (industries, technologies,
+// departments and functions, and the industries and technologies of job
+// posts) are published by AI-Ark as CSV files and are downloaded on demand;
+// they carry no authentication because they are public.
 package catalog
 
 import (
@@ -55,6 +55,16 @@ const (
 	MetricFunction = "metric-functions"
 	TimeFrames     = "time-frames"
 	MatchModes     = "match-modes"
+	MailPlatforms  = "mail-platforms"
+	MailSecurity   = "mail-security"
+
+	JobIndustries      = "job-industries"
+	JobTechnologies    = "job-technologies"
+	JobTechCategories  = "job-technology-categories"
+	JobSeniority       = "job-seniority"
+	JobEmploymentTypes = "job-employment-types"
+	JobLanguages       = "job-languages"
+	HiringModels       = "hiring-models"
 )
 
 // All lists every catalog in display order.
@@ -74,6 +84,15 @@ func All() []Catalog {
 		{Name: MetricFunction, Description: "departments for --headcount and --headcount-growth", Values: MetricFunctions},
 		{Name: TimeFrames, Description: "look-back windows for --headcount-growth", Values: TimeFrameValues},
 		{Name: MatchModes, Description: "text match modes, --match", Values: MatchModeValues},
+		{Name: MailPlatforms, Description: "email platforms, --mail-platform and --company-mail-platform", Values: MailPlatformValues},
+		{Name: MailSecurity, Description: "email security gateways, --mail-security and --company-mail-security", Values: MailSecurityValues},
+		{Name: JobIndustries, Description: "job post industries (766 values), job-posts --industry", URL: "https://ai-ark.com/static/job-post-industries.csv?v=2"},
+		{Name: JobTechnologies, Description: "technologies named in job posts (275,000+ values), job-posts --technology", URL: "https://ai-ark.com/static/job-post-technologies.csv?v=2"},
+		{Name: JobTechCategories, Description: "technology categories of job posts (47 values), job-posts --technology", URL: "https://ai-ark.com/static/job-post-technology-categories.csv?v=2"},
+		{Name: JobSeniority, Description: "job post seniority levels, job-posts --seniority", Values: JobSeniorityLevels},
+		{Name: JobEmploymentTypes, Description: "job post employment types, job-posts --employment-type", Values: JobEmploymentTypeValues},
+		{Name: JobLanguages, Description: "languages job posts are written in, job-posts --language", Values: JobLanguageValues},
+		{Name: HiringModels, Description: "who posted a job, job-posts --hiring-model", Values: HiringModelValues},
 	}
 }
 
@@ -99,7 +118,8 @@ func NewFetcher(version string) *Fetcher {
 	return &Fetcher{http: &http.Client{Timeout: 60 * time.Second}, ua: "ark-cli/" + version}
 }
 
-// maxCSV bounds a catalog download; the largest file is well under 1 MB.
+// maxCSV bounds a catalog download; the largest file (job post
+// technologies) is about 4 MB.
 const maxCSV = 16 << 20
 
 // Entries returns the values of a catalog, downloading it when needed.

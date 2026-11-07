@@ -14,7 +14,31 @@ import (
 // extracted from https://docs.ai-ark.com/reference). A path the flags cannot
 // produce means a filter the CLI does not expose.
 func TestFlagsReachEverySpecPath(t *testing.T) {
-	raw, err := os.ReadFile("testdata/search_paths.json")
+	assertReached(t, "testdata/search_paths.json",
+		dryRun(t, append([]string{"people", "search"}, everyFlag(peopleScope)...)...),
+		dryRun(t, append([]string{"company", "search"}, everyFlag(companyScope)...)...),
+		dryRun(t, append([]string{"people", "export", "--webhook", "https://example.com/hook"}, everyFlag(peopleScope)...)...),
+	)
+}
+
+// TestJobPostFlagsReachEverySpecPath does the same for job post search,
+// whose request schema (testdata/job_post_paths.json) has its own sections.
+// Job post search also must not leak a people or company section.
+func TestJobPostFlagsReachEverySpecPath(t *testing.T) {
+	body := dryRun(t, append([]string{"job-posts", "search"}, everyFlag(jobScope)...)...)
+	assertReached(t, "testdata/job_post_paths.json", body)
+	for _, key := range []string{"account", "contact", "lists", "lookalikeDomains", "webhook"} {
+		if _, has := body[key]; has {
+			t.Errorf("job post search must not carry %q", key)
+		}
+	}
+}
+
+// assertReached fails when a leaf path listed in the spec fixture is in none
+// of the bodies.
+func assertReached(t *testing.T, fixture string, bodies ...map[string]any) {
+	t.Helper()
+	raw, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,17 +46,12 @@ func TestFlagsReachEverySpecPath(t *testing.T) {
 	if err := json.Unmarshal(raw, &specPaths); err != nil {
 		t.Fatal(err)
 	}
-
 	reached := map[string]bool{}
-	collect := func(body map[string]any) {
+	for _, body := range bodies {
 		for _, p := range leafPaths("", body) {
 			reached[p] = true
 		}
 	}
-	collect(dryRun(t, append([]string{"people", "search"}, everyFlag(peopleScope)...)...))
-	collect(dryRun(t, append([]string{"company", "search"}, everyFlag(companyScope)...)...))
-	collect(dryRun(t, append([]string{"people", "export", "--webhook", "https://example.com/hook"}, everyFlag(peopleScope)...)...))
-
 	var missing []string
 	for _, p := range specPaths {
 		if !reached[p] {
@@ -40,7 +59,7 @@ func TestFlagsReachEverySpecPath(t *testing.T) {
 		}
 	}
 	if len(missing) > 0 {
-		t.Errorf("%d spec paths are not reachable from flags:\n  %s", len(missing), strings.Join(missing, "\n  "))
+		t.Errorf("%d paths of %s are not reachable from flags:\n  %s", len(missing), fixture, strings.Join(missing, "\n  "))
 	}
 }
 
@@ -55,6 +74,13 @@ func everyFlag(scope filterScope) []string {
 		if f.kind == keywordFacet {
 			args = append(args, "--"+f.name+"-source", f.defaultSources[0])
 		}
+	}
+	if scope == jobScope {
+		return append(args,
+			"--salary", "80k-150k", "--hiring-model", "direct",
+			"--posted", "2026-10-01..2026-10-25", "--expires", "2026-10-25..2026-12-31",
+			"--collected", "2026-10-01..2026-10-31",
+		)
 	}
 	acct := accountFlagName(scope)
 	args = append(args,
@@ -216,4 +242,34 @@ func sameBound(a, b *float64) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+func TestDays(t *testing.T) {
+	var p parser
+	d := p.days("posted", "2026-10-01..2026-10-25")
+	if p.err != nil || d.Type != "RANGE" || d.Range.Start != "2026-10-01" || d.Range.End != "2026-10-25" {
+		t.Errorf("days = %+v, %v", d, p.err)
+	}
+	if d := p.days("posted", "2026-10-01.."); p.err != nil || d.Range.Start != "2026-10-01" || d.Range.End != "" {
+		t.Errorf("open end = %+v, %v", d, p.err)
+	}
+	if d := p.days("posted", "..2026-10-25"); p.err != nil || d.Range.Start != "" || d.Range.End != "2026-10-25" {
+		t.Errorf("open start = %+v, %v", d, p.err)
+	}
+	if d := p.days("expires", "any"); p.err != nil || d.Type != "ALL" || d.Range != nil {
+		t.Errorf("any = %+v, %v", d, p.err)
+	}
+	if d := p.days("expires", "none"); p.err != nil || d.Type != "NONE" {
+		t.Errorf("none = %+v, %v", d, p.err)
+	}
+	if d := p.days("posted", ""); p.err != nil || d != nil {
+		t.Errorf("empty = %+v, %v", d, p.err)
+	}
+	for _, bad := range []string{"2026-10-01", "..", "2026-13-01..", "01.10.2026..", "2026-10-25..2026-10-01"} {
+		var p parser
+		p.days("posted", bad)
+		if p.err == nil {
+			t.Errorf("days(%q) should fail", bad)
+		}
+	}
 }

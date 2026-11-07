@@ -62,16 +62,18 @@ func (p *parser) rangeOrKind(flag string, in []string) *client.RangeFilter {
 	return client.Ranges(p.bands(flag, specs))
 }
 
-func (p *parser) year(flag, spec string) *client.YearFilter {
+// bandOrKind handles filters that accept a single band or the words
+// any/none.
+func (p *parser) bandOrKind(flag, spec string) *client.BandFilter {
 	switch strings.ToLower(strings.TrimSpace(spec)) {
 	case "":
 		return nil
 	case "any", "all":
-		return &client.YearFilter{Type: client.RangeTypeAll}
+		return &client.BandFilter{Type: client.RangeTypeAll}
 	case "none":
-		return &client.YearFilter{Type: client.RangeTypeNone}
+		return &client.BandFilter{Type: client.RangeTypeNone}
 	}
-	return &client.YearFilter{Type: client.RangeTypeRange, Range: p.band(flag, spec)}
+	return &client.BandFilter{Type: client.RangeTypeRange, Range: p.band(flag, spec)}
 }
 
 func (p *parser) enum(flag string, allowed, in []string) []string {
@@ -82,35 +84,98 @@ func (p *parser) enum(flag string, allowed, in []string) []string {
 	return values
 }
 
-// dateBand parses --funding-date, "YYYY-MM-DD..YYYY-MM-DD" (either side
-// optional), into the epoch-millisecond strings the API expects. The end
-// date is inclusive: it maps to the last millisecond of that day.
+// choice validates a flag that takes exactly one value of a catalog; "" when
+// the flag is unset.
+func (p *parser) choice(flag string, allowed []string, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	canon, ok := catalog.Normalize(allowed, value)
+	if !ok {
+		p.fail(flag, fmt.Errorf("unknown value %q (allowed: %s)", value, joinValues(allowed)))
+	}
+	return canon
+}
+
+// dateBand parses --funding-date into the epoch-millisecond strings the API
+// expects. The end date is inclusive: it maps to the last millisecond of
+// that day.
 func (p *parser) dateBand(spec string) *client.TimeRange {
-	const flag = "funding-date"
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
+	if strings.TrimSpace(spec) == "" {
 		return nil
 	}
-	lo, hi, ok := strings.Cut(spec, "..")
-	if !ok || (lo == "" && hi == "") {
-		p.fail(flag, fmt.Errorf("want YYYY-MM-DD..YYYY-MM-DD (either side may be empty), got %q", spec))
+	start, end, err := parseDayBand(spec)
+	if err != nil {
+		p.fail("funding-date", err)
 		return nil
 	}
-	millis := func(s string, endOfDay bool) string {
-		if s == "" {
+	if !end.IsZero() {
+		end = end.AddDate(0, 0, 1).Add(-time.Millisecond)
+	}
+	millis := func(t time.Time) string {
+		if t.IsZero() {
 			return ""
-		}
-		t, err := time.Parse("2006-01-02", s)
-		if err != nil {
-			p.fail(flag, fmt.Errorf("%q is not a YYYY-MM-DD date", s))
-			return ""
-		}
-		if endOfDay {
-			t = t.AddDate(0, 0, 1).Add(-time.Millisecond)
 		}
 		return strconv.FormatInt(t.UnixMilli(), 10)
 	}
-	return &client.TimeRange{Start: millis(lo, false), End: millis(hi, true)}
+	return &client.TimeRange{Start: millis(start), End: millis(end)}
+}
+
+// days parses a job post date flag: a band of calendar days, or any / none.
+// Job post dates go over the wire as days, both ends inclusive.
+func (p *parser) days(flag, spec string) *client.DayFilter {
+	switch strings.ToLower(strings.TrimSpace(spec)) {
+	case "":
+		return nil
+	case "any", "all":
+		return &client.DayFilter{Type: client.RangeTypeAll}
+	case "none":
+		return &client.DayFilter{Type: client.RangeTypeNone}
+	}
+	start, end, err := parseDayBand(spec)
+	if err != nil {
+		p.fail(flag, err)
+		return nil
+	}
+	day := func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.Format(time.DateOnly)
+	}
+	return &client.DayFilter{Type: client.RangeTypeRange, Range: &client.DayRange{Start: day(start), End: day(end)}}
+}
+
+// parseDayBand parses "YYYY-MM-DD..YYYY-MM-DD" into its two days. Either
+// side may be empty; an open side is the zero time.
+func parseDayBand(spec string) (start, end time.Time, err error) {
+	lo, hi, ok := strings.Cut(spec, "..")
+	lo, hi = strings.TrimSpace(lo), strings.TrimSpace(hi)
+	if !ok || (lo == "" && hi == "") {
+		return start, end, fmt.Errorf("want YYYY-MM-DD..YYYY-MM-DD (either side may be empty), got %q", strings.TrimSpace(spec))
+	}
+	if start, err = parseDay(lo); err != nil {
+		return start, end, err
+	}
+	if end, err = parseDay(hi); err != nil {
+		return start, end, err
+	}
+	if lo != "" && hi != "" && start.After(end) {
+		return start, end, fmt.Errorf("the start %s is after the end %s", lo, hi)
+	}
+	return start, end, nil
+}
+
+// parseDay parses a YYYY-MM-DD day; "" is open (the zero time).
+func parseDay(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	day, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		return day, fmt.Errorf("%q is not a YYYY-MM-DD date", s)
+	}
+	return day, nil
 }
 
 // geo builds a radius search from --near, --radius, and --radius-unit.

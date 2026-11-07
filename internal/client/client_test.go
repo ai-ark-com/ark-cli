@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,20 +137,131 @@ func TestRateLimitGivesUp(t *testing.T) {
 	}
 }
 
-func TestRetryDelay(t *testing.T) {
+// A wait past the ceiling is not slept through: the call fails at once and
+// the error names the window that is used up and when to retry.
+func TestLongRateLimitFailsAtOnce(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]time.Duration{
-		"":    time.Second,
-		"abc": time.Second,
-		"-3":  time.Second,
-		"2":   2 * time.Second,
-		"999": 10 * time.Second,
+	var calls atomic.Int32
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "45")
+		w.Header().Set("X-RateLimit-Limit-Minute", "5")
+		w.Header().Set("X-RateLimit-Remaining-Minute", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	})
+	_, err := c.Credits(context.Background())
+	if !isStatus(err, http.StatusTooManyRequests) {
+		t.Fatalf("err = %v, want 429 APIError", err)
 	}
-	for in, want := range tests {
-		if got := retryDelay(in); got != want {
-			t.Errorf("retryDelay(%q) = %v, want %v", in, got, want)
+	if calls.Load() != 1 {
+		t.Errorf("calls = %d, want 1 (no retry before Retry-After)", calls.Load())
+	}
+	for _, want := range []string{"API rate limit exceeded. All 5 requests per minute are used. Retry in 4", " UTC)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Error() = %q, want it to contain %q", err, want)
 		}
+	}
+}
+
+func TestRetryAfterAndDelay(t *testing.T) {
+	t.Parallel()
+
+	headers := map[string]time.Duration{"": 0, "abc": 0, "-3": 0, "2": 2 * time.Second, "999": 999 * time.Second}
+	for in, want := range headers {
+		if got := retryAfter(in); got != want {
+			t.Errorf("retryAfter(%q) = %v, want %v", in, got, want)
+		}
+	}
+	delays := map[time.Duration]time.Duration{
+		0:                time.Second,
+		2 * time.Second:  2 * time.Second,
+		10 * time.Second: 10 * time.Second,
+		11 * time.Second: -1,
+		4 * time.Hour:    -1,
+	}
+	for in, want := range delays {
+		if got := retryDelay(in); got != want {
+			t.Errorf("retryDelay(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestLimitsFromHeaders(t *testing.T) {
+	t.Parallel()
+
+	header := func(pairs ...string) http.Header {
+		h := http.Header{}
+		for i := 0; i < len(pairs); i += 2 {
+			h.Set(pairs[i], pairs[i+1])
+		}
+		return h
+	}
+	tests := []struct {
+		name string
+		h    http.Header
+		want []string
+	}{
+		{
+			"unlimited plan, fixed windows", header(
+				"ratelimit-limit", "4000", "ratelimit-remaining", "3999", "ratelimit-reset", "3731",
+				"x-ratelimit-limit-second", "10", "x-ratelimit-remaining-second", "9", "x-ratelimit-reset-second", "1",
+				"x-ratelimit-limit-14400", "4000", "x-ratelimit-remaining-14400", "3660", "x-ratelimit-reset-14400", "3731",
+				"x-ratelimit-limit-604800", "25000", "x-ratelimit-remaining-604800", "24090", "x-ratelimit-reset-604800", "479868"),
+			[]string{
+				"1 of 10 requests per second used (resets in 1s)",
+				"340 of 4000 requests per 4 hours used (resets in 1h 2m)",
+				"910 of 25000 requests per 7 days used (resets in 5d 13h)",
+			},
+		},
+		{
+			"credit plan: the shared reset describes its one window", header(
+				"RateLimit-Limit", "5", "RateLimit-Remaining", "4", "RateLimit-Reset", "34",
+				"X-RateLimit-Limit-Minute", "5", "X-RateLimit-Remaining-Minute", "4"),
+			[]string{"1 of 5 requests per minute used (resets in 34s)"},
+		},
+		{
+			"limit without usage, as on a per-second 429 of an unlimited plan", header(
+				"x-ratelimit-limit-14400", "4000", "x-ratelimit-reset-14400", "89"),
+			[]string{"4000 requests per 4 hours (resets in 1m 29s)"},
+		},
+		{
+			"shared reset of another window is not borrowed", header(
+				"ratelimit-limit", "10", "ratelimit-remaining", "0", "ratelimit-reset", "1",
+				"x-ratelimit-limit-604800", "25000", "x-ratelimit-remaining-604800", "24090"),
+			[]string{"910 of 25000 requests per 7 days used"},
+		},
+		{"junk and unknown windows are ignored", header(
+			"x-ratelimit-limit-second", "abc", "x-ratelimit-limit-fortnight", "5", "x-ratelimit-limit-0", "5"), nil},
+		{"no headers", http.Header{}, nil},
+	}
+	for _, tt := range tests {
+		var got []string
+		for _, l := range limitsFrom(tt.h) {
+			got = append(got, l.String())
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestResultCarriesLimits(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(creditHeader, "-0.2")
+		w.Header().Set("X-RateLimit-Limit-Minute", "5")
+		w.Header().Set("X-RateLimit-Remaining-Minute", "3")
+		_, _ = w.Write([]byte(`{"total":1}`))
+	})
+	res, err := c.Credits(context.Background())
+	if err != nil {
+		t.Fatalf("Credits: %v", err)
+	}
+	if len(res.Limits) != 1 || res.Limits[0].String() != "2 of 5 requests per minute used" || res.Limits[0].UsedUp() {
+		t.Errorf("limits = %+v", res.Limits)
 	}
 }
 

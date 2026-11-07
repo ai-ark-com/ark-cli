@@ -140,6 +140,108 @@ func TestCompanySearchDryRun(t *testing.T) {
 	}
 }
 
+func TestMailFiltersDryRun(t *testing.T) {
+	body := dryRun(t, "company", "search", "--mail-platform", "google,microsoft", "--exclude-mail-security", "proofpoint")
+	if got := at(t, body, "account.mail.platform.any.include"); !equalStrings(got, "google", "microsoft") {
+		t.Errorf("mail platform = %v", got)
+	}
+	if got := at(t, body, "account.mail.security.any.exclude"); !equalStrings(got, "proofpoint") {
+		t.Errorf("mail security = %v", got)
+	}
+
+	body = dryRun(t, "people", "search", "--seniority", "vp", "--company-mail-platform", "google")
+	if got := at(t, body, "account.mail.platform.any.include"); !equalStrings(got, "google") {
+		t.Errorf("people search mail platform = %v", got)
+	}
+	if _, has := at(t, body, "account.mail").(map[string]any)["security"]; has {
+		t.Error("an unset mail security filter must be omitted")
+	}
+}
+
+func TestJobPostSearchDryRun(t *testing.T) {
+	body := dryRun(t, "job-posts", "search",
+		"--title", "sales manager,account executive", "--exclude-title", "intern",
+		"--text", "salesforce", "--location", "Germany,Austria",
+		"--seniority", "Mid-Senior,director", "--employment-type", "full-time",
+		"--technology", "Salesforce", "--language", "german",
+		"--salary", "80k-150k", "--hiring-model", "direct",
+		"--posted", "2026-10-01..", "--exclude-company-domain", "sap.com",
+		"--company-id", sampleUUID, "--page", "1", "--size", "50")
+
+	if got := at(t, body, "job.title.any.include.mode"); got != "WORD" {
+		t.Errorf("default match mode of job posts = %v, want WORD", got)
+	}
+	if got := at(t, body, "job.title.any.include.content"); !equalStrings(got, "sales manager", "account executive") {
+		t.Errorf("title = %v", got)
+	}
+	if got := at(t, body, "job.title.any.exclude.content"); !equalStrings(got, "intern") {
+		t.Errorf("title exclude = %v", got)
+	}
+	if got := at(t, body, "job.titleOrDescription.any.include.content"); !equalStrings(got, "salesforce") {
+		t.Errorf("text = %v", got)
+	}
+	if got := at(t, body, "job.location.any.include.content"); !equalStrings(got, "Germany", "Austria") {
+		t.Errorf("location = %v", got)
+	}
+	if got := at(t, body, "job.seniority.any.include"); !equalStrings(got, "mid_senior", "director") {
+		t.Errorf("seniority normalised = %v", got)
+	}
+	if got := at(t, body, "job.employmentType.any.include"); !equalStrings(got, "full_time") {
+		t.Errorf("employment type normalised = %v", got)
+	}
+	if got := at(t, body, "job.technologies.any.include"); !equalStrings(got, "Salesforce") {
+		t.Errorf("technologies = %v", got)
+	}
+	if got := at(t, body, "job.language.name.any.include"); !equalStrings(got, "german") {
+		t.Errorf("language = %v", got)
+	}
+	salary := at(t, body, "job.yearlySalaryUsd.range").(map[string]any)
+	if salary["start"] != 80000.0 || salary["end"] != 150000.0 {
+		t.Errorf("salary must be a single range object, got %v", salary)
+	}
+	if got := at(t, body, "job.hiringModel"); got != "DIRECT" {
+		t.Errorf("hiring model = %v", got)
+	}
+	posted := at(t, body, "job.postedAt").(map[string]any)
+	if posted["type"] != "RANGE" || posted["range"].(map[string]any)["start"] != "2026-10-01" {
+		t.Errorf("postedAt = %v", posted)
+	}
+	if _, has := posted["range"].(map[string]any)["end"]; has {
+		t.Error("an open posted end must be omitted")
+	}
+	if got := at(t, body, "company.domain.any.exclude"); !equalStrings(got, "sap.com") {
+		t.Errorf("company domain exclude = %v", got)
+	}
+	if got := at(t, body, "company.id.any.include"); !equalStrings(got, sampleUUID) {
+		t.Errorf("company id = %v", got)
+	}
+	if body["page"] != 1.0 || body["size"] != 50.0 {
+		t.Errorf("page/size = %v/%v", body["page"], body["size"])
+	}
+	for _, key := range []string{"account", "contact", "lists"} {
+		if _, has := body[key]; has {
+			t.Errorf("job post search must not carry %q", key)
+		}
+	}
+
+	body = dryRun(t, "job-posts", "search", "--title", "sales manager", "--match", "smart", "--salary", "any")
+	if got := at(t, body, "job.title.any.include.mode"); got != "SMART" {
+		t.Errorf("explicit --match = %v", got)
+	}
+	if got := at(t, body, "job.yearlySalaryUsd.type"); got != "ALL" {
+		t.Errorf("salary any = %v", got)
+	}
+	if _, has := body["company"]; has {
+		t.Error("an empty company section must be omitted")
+	}
+
+	stdin := `{"job":{"title":{"any":{"include":{"mode":"WORD","content":["sales manager"]}}}}}`
+	stdout, err := run(t, stdin, "job-posts", "search", "--body", "-", "--dry-run")
+	if err != nil || !strings.Contains(stdout, "sales manager") {
+		t.Errorf("stdin body: err=%v out=%s", err, stdout)
+	}
+}
+
 func TestExportDryRunCarriesWebhookAndSize(t *testing.T) {
 	body := dryRun(t, "people", "export", "--industry", "retail", "--size", "5000", "--webhook", "https://example.com/hook")
 	if body["webhook"] != "https://example.com/hook" || body["size"] != 5000.0 {
@@ -243,9 +345,22 @@ func TestUsageErrors(t *testing.T) {
 		{"people", "personality", "john-doe"},                                                // not a URL
 		{"lists", "create", "--type", "people", "--values", "bad"},                           // bad id
 		{"catalog", "nope"}, // unknown catalog
-		{"people", "search", "--location", "x", "--radius", "5", "--dry-run"},               // --radius without --near
-		{"people", "search", "--location", "x", "--keyword-source", "SUMMARY", "--dry-run"}, // source without --keyword
-		{"company", "search", "--lookalike", ",,,,,,", "--dry-run"},                         // no lookalike values
+		{"people", "search", "--location", "x", "--radius", "5", "--dry-run"},                   // --radius without --near
+		{"people", "search", "--location", "x", "--keyword-source", "SUMMARY", "--dry-run"},     // source without --keyword
+		{"company", "search", "--lookalike", ",,,,,,", "--dry-run"},                             // no lookalike values
+		{"company", "search", "--funding-date", "2026-02-01..2026-01-01", "--dry-run"},          // inverted date band
+		{"job-posts", "search", "--dry-run"},                                                    // no filters
+		{"job-posts", "search", "--description", "x", "--match", "strict", "--dry-run"},         // strict on post text
+		{"job-posts", "search", "--text", "x", "--match", "strict", "--dry-run"},                // strict on title or text
+		{"job-posts", "search", "--title", "x", "--seniority", "c_suite", "--dry-run"},          // people seniority value
+		{"job-posts", "search", "--title", "x", "--hiring-model", "both", "--dry-run"},          // unknown hiring model
+		{"job-posts", "search", "--title", "x", "--hiring-model", "direct,agency", "--dry-run"}, // two hiring models
+		{"job-posts", "search", "--title", "x", "--posted", "2026-10-01", "--dry-run"},          // date band without ..
+		{"job-posts", "search", "--title", "x", "--salary", "150k-80k", "--dry-run"},            // inverted salary band
+		{"job-posts", "search", "--company-id", "nope", "--dry-run"},                            // bad uuid
+		{"job-posts", "search", "--title", "x", "--employees", "51-200", "--dry-run"},           // company search flag
+		{"job-posts", "search", "--title", "x", "--size", "500", "--dry-run"},                   // size cap
+		{"job-posts", "search", "--body", "-", "--dry-run"},                                     // body without job filters
 	}
 	for _, args := range cases {
 		_, err := run(t, "", args...)
@@ -282,6 +397,14 @@ func TestCatalogListsEmbeddedValues(t *testing.T) {
 	stdout, err = run(t, "", "catalog")
 	if err != nil || !strings.Contains(stdout, "industries") {
 		t.Errorf("catalog index: err=%v out=%s", err, stdout)
+	}
+	stdout, err = run(t, "", "catalog", "mail-security", "--search", "proof")
+	if err != nil || strings.TrimSpace(stdout) != "proofpoint" {
+		t.Errorf("mail-security catalog: err=%v out=%q", err, stdout)
+	}
+	stdout, err = run(t, "", "catalog", "job-seniority", "--search", "mid")
+	if err != nil || strings.TrimSpace(stdout) != "mid_senior" {
+		t.Errorf("job-seniority catalog: err=%v out=%q", err, stdout)
 	}
 }
 

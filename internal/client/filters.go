@@ -113,9 +113,10 @@ func Ranges(bands []Range) *RangeFilter {
 	return &RangeFilter{Type: RangeTypeRange, Range: bands}
 }
 
-// YearFilter is the founded-year filter; unlike RangeFilter its range is a
-// single object rather than an array.
-type YearFilter struct {
+// BandFilter matches a single numeric band: the founded year of a company,
+// the yearly salary of a job post. Unlike RangeFilter its range is one
+// object rather than an array.
+type BandFilter struct {
 	Type  string `json:"type"`
 	Range *Range `json:"range,omitempty"`
 }

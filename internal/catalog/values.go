@@ -75,3 +75,63 @@ var MatchModeValues = []string{"SMART", "WORD", "STRICT"}
 
 // SubmissionStates are the values of the state query of the submissions endpoints.
 var SubmissionStates = []string{"PENDING", "SETTLED"}
+
+// MailPlatformValues are the known values of account.mail.platform. The list
+// grows as new providers are detected, so the filter accepts other values too.
+var MailPlatformValues = []string{
+	"microsoft", "google", "self_hosted", "other", "ionos", "hostinger", "godaddy",
+	"zoho", "strato", "ovh", "siteground", "allinkl", "opensrs", "cloudflare",
+	"namecheap", "locaweb", "onecom", "tencent", "titan", "20i", "rackspace", "alibaba",
+	"netease", "jimdo", "uolhost", "123reg", "infomaniak", "gandi", "network_solutions",
+	"mailgun", "domainfactory", "register_it", "dogado", "hetzner", "amazon", "yandex",
+	"proton", "yahoo", "mittwald", "kinghost", "united_domains", "telekom",
+	"mijndomein", "combell", "hostpoint", "transip", "icloud", "namesco", "fastmail",
+	"aruba", "intermedia", "aplus", "mailhostbox", "web_com", "lolipop", "hostnet",
+	"domeneshop", "amen", "improvmx", "loopia", "webnode", "mxroute", "263",
+	"dreamhost", "simply", "jouwweb", "dondominio", "skymail", "ocn", "nominalia",
+	"openxchange", "lark", "forwardemail", "seeweb", "lcn", "goneo", "sakura",
+	"krystal", "zenbox", "rediffmail", "home_pl", "umbler", "cpi", "nazwa",
+	"namebright", "wordpress", "kagoya", "mailbox", "wedos", "mailru", "seznam",
+	"naver", "xserver",
+}
+
+// MailSecurityValues are the known values of account.mail.security.
+var MailSecurityValues = []string{
+	"proofpoint", "mimecast", "other", "barracuda", "hornetsecurity", "mailchannels",
+	"spamexperts", "appriver", "trendmicro", "cisco", "sophos", "mailinblack",
+	"spamtitan", "vipre", "spamhero", "mesh", "mailprotector", "datev", "cloudflare",
+	"symantec", "fortimail", "vade", "mailguard", "topsec", "securence", "libraesva",
+	"forcepoint", "nospamproxy", "retarus", "heimdal", "trellix", "altospam",
+	"mailroute", "seppmail", "gosecure",
+}
+
+// JobSeniorityLevels are the values of job.seniority (job post search).
+var JobSeniorityLevels = []string{
+	"internship", "entry", "associate", "mid_senior", "director", "executive",
+}
+
+// JobEmploymentTypeValues are the values of job.employmentType.
+var JobEmploymentTypeValues = []string{
+	"full_time", "part_time", "contract", "temporary", "internship", "volunteer",
+}
+
+// JobLanguageValues are the known values of job.language.name.
+var JobLanguageValues = []string{
+	"english", "german", "french", "dutch", "portuguese", "spanish", "chinese",
+	"italian", "swedish", "korean", "polish", "japanese", "czech", "turkish", "danish",
+	"vietnamese", "norwegian", "greek", "finnish", "indonesian", "hungarian",
+	"romanian", "arabic", "russian", "catalan", "ukrainian", "hebrew", "slovak",
+	"lithuanian", "thai", "croatian", "slovenian", "latvian", "bulgarian",
+	"azerbaijani", "albanian", "serbian", "georgian", "estonian", "luxembourgish",
+	"latin", "bengali", "armenian", "welsh", "hindi", "macedonian", "serbo-croatian",
+	"persian", "burmese", "malay", "dhivehi", "marathi", "khmer", "malayalam",
+	"mongolian", "basque", "icelandic", "afrikaans", "esperanto", "kazakh", "uzbek",
+	"galician", "urdu", "irish", "tagalog", "tamil", "nepali", "oriya", "punjabi",
+	"pashto", "telugu", "western frisian", "amharic", "egyptian arabic", "tatar",
+	"cebuano", "central kurdish", "sinhala", "gujarati", "lao", "maltese", "assamese",
+	"breton", "interlingua", "lojban", "low german", "mazanderani", "minangkabau",
+	"scottish gaelic", "waray",
+}
+
+// HiringModelValues are the values of job.hiringModel.
+var HiringModelValues = []string{"DIRECT", "AGENCY"}

@@ -61,6 +61,9 @@ var (
 		"id", "summary.name", "summary.industry", "summary.type", "summary.staff.total",
 		"location.headquarter.country", "link.domain",
 	}
+	jobPostColumns = []string{
+		"id", "title", "company.name", "location.raw", "seniority", "posted_at", "company.id",
+	}
 )
 
 const (
@@ -167,7 +170,7 @@ func flatten(prefix string, v any, out map[string]string) {
 	}
 }
 
-// pickColumns chooses a preset when the rows look like people or companies,
+// pickColumns chooses a preset when the rows look like people, companies or job posts,
 // otherwise the first few flattened keys in sorted order.
 func pickColumns(rows []map[string]string) []string {
 	if len(rows) == 0 {
@@ -186,6 +189,8 @@ func pickColumns(rows []map[string]string) []string {
 		return peopleColumns
 	case has("summary."):
 		return companyColumns
+	case has("posted_at"):
+		return jobPostColumns
 	}
 	seen := map[string]struct{}{}
 	for _, row := range rows {

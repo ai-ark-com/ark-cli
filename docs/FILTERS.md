@@ -1,10 +1,12 @@
 # Filter checklist
 
-Every field of the search request body (people search, preview, export and
-company search) and the flag that sets it. Taken from the OpenAPI spec at
-<https://docs.ai-ark.com/reference>. `cmd/testdata/search_paths.json` holds
-the 297 leaf paths; `TestFlagsReachEverySpecPath` fails if a flag stops
-covering one.
+Every field of the search request bodies (people search, preview, export,
+company search and job post search) and the flag that sets it. Taken from
+the OpenAPI spec at <https://docs.ai-ark.com/reference>.
+`cmd/testdata/search_paths.json` holds the 305 leaf paths of the people and
+company bodies and `cmd/testdata/job_post_paths.json` the 91 of the job post
+body; `TestFlagsReachEverySpecPath` and `TestJobPostFlagsReachEverySpecPath`
+fail if a flag stops covering one.
 
 ## How list filters map to flags
 
@@ -82,6 +84,8 @@ the short names shown in the second column.
 | `account.technologies` | `--technology` | `--technology` | matched: `ark catalog technologies` |
 | `account.technology` (legacy, exact values) | `--technology-exact` | `--technology-exact` | plain |
 | `account.naics` | `--naics` | `--naics` | plain |
+| `account.mail.platform` | `--company-mail-platform` | `--mail-platform` | plain: `ark catalog mail-platforms` |
+| `account.mail.security` | `--company-mail-security` | `--mail-security` | plain: `ark catalog mail-security` |
 | `account.foundedYear` | `--founded 2015-2022` / `any` / `none` | same | year band or ALL / NONE |
 | `account.employeeSize` | `--employees 51-200` | same | bands, repeatable |
 | `account.retailSize` | `--retail-locations 10-100` | same | bands, repeatable |
@@ -99,6 +103,34 @@ the short names shown in the second column.
 | `lookalikeDomains` | - | `--lookalike` | up to 5 domains or LinkedIn company URLs |
 | `lists.company_id.exclude` | - | `--exclude-list` | list UUIDs |
 
+## Job post filters (`ark job-posts search`)
+
+The body has a `job` and a `company` object instead of `contact` and
+`account`. Matched filters default to `--match word`; `job.description` and
+`job.titleOrDescription` refuse `strict`.
+
+| Wire path | Flag | Kind / values |
+| --- | --- | --- |
+| `job.title` | `--title` | matched |
+| `job.description` | `--description` | matched (word or smart) |
+| `job.titleOrDescription` | `--text` | matched (word or smart) |
+| `job.location` | `--location` | matched |
+| `job.employmentType` | `--employment-type` | enum: `ark catalog job-employment-types` |
+| `job.seniority` | `--seniority` | enum: `ark catalog job-seniority` |
+| `job.industries` | `--industry` | plain: `ark catalog job-industries` |
+| `job.technologies` | `--technology` | plain, a name or a category: `ark catalog job-technologies`, `ark catalog job-technology-categories` |
+| `job.language.name` | `--language` | plain: `ark catalog job-languages` |
+| `job.id` | `--id` | plain |
+| `job.yearlySalaryUsd` | `--salary 80k-150k` / `any` / `none` | band in USD per year, or ALL / NONE |
+| `job.hiringModel` | `--hiring-model direct` | one of `ark catalog hiring-models` |
+| `job.postedAt` | `--posted 2026-10-01..2026-10-25` | day band, or ALL / NONE |
+| `job.expiredAt` | `--expires 2026-10-25..` | day band, or ALL / NONE |
+| `job.created` | `--collected 2026-10-01..` | day band, or ALL / NONE |
+| `company.id` | `--company-id` | AI-Ark company UUIDs |
+| `company.domain` | `--company-domain` | plain |
+| `company.name` | `--company-name` | matched |
+| `company.linkedin` | `--company-linkedin` | plain (full URLs) |
+
 ## Request envelope
 
 | Wire path | Flag |
@@ -113,4 +145,7 @@ the short names shown in the second column.
 Numbers accept `k`, `m`, `b` suffixes. Tenure bands use `NyMm` (months
 beyond 11 roll into years), e.g. `1y6m-3y`. Growth percentages use
 `from..to` so they can be negative, e.g. `-20..-5`. `--revenue` and
-`--founded` also accept `any` (a value exists) and `none` (no value).
+`--founded` also accept `any` (a value exists) and `none` (no value), and so
+do `--salary`, `--posted`, `--expires` and `--collected` of job post search.
+Day bands are `YYYY-MM-DD..YYYY-MM-DD`, both days included; either side may
+be left empty.

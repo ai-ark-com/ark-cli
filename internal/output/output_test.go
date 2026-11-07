@@ -172,3 +172,21 @@ func TestParseFormat(t *testing.T) {
 		t.Error("ParseFormat(xml) should error")
 	}
 }
+
+func TestJobPostPreset(t *testing.T) {
+	t.Parallel()
+
+	body := json.RawMessage(`{"content":[{"id":"4466524988","title":"Bookkeeper","seniority":"Associate",
+	  "location":{"raw":"Sacramento, CA"},"company":{"id":"c1","name":"LHH","domains":["lhh.com"]},
+	  "posted_at":"2026-09-22"}],"totalElements":1}`)
+	var buf bytes.Buffer
+	if _, err := Render(&buf, body, Options{Format: Table}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"company.name", "posted_at", "company.id", "Bookkeeper", "LHH", "Sacramento, CA", "2026-09-22"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("job post preset is missing %q:\n%s", want, out)
+		}
+	}
+}

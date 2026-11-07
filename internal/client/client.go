@@ -39,6 +39,10 @@ const (
 	maxResponseBody = 64 << 20
 	// retryAttempts is how many times a rate-limited (429) call is retried.
 	retryAttempts = 3
+	// retryCeiling is the longest wait the client sleeps through on its own.
+	// A longer one (a full minute, hour or week window) fails at once and
+	// the error says when to retry.
+	retryCeiling = 10 * time.Second
 )
 
 // ErrRedirect is returned when the API answers with a redirect. Redirects
@@ -77,23 +81,44 @@ func New(baseURL, token, version string) *Client {
 // BaseURL returns the host the client talks to.
 func (c *Client) BaseURL() string { return c.baseURL }
 
-// Result carries the decoded body and the credits the call consumed.
+// Result carries the decoded body, the credits the call consumed and where
+// the request limits of the plan stand after it.
 type Result struct {
 	Body   json.RawMessage
-	Credit string // value of X-Credit, e.g. "-0.5"; empty if the server sent none
+	Credit string // value of X-Credit, e.g. "-0.5"; empty if the call was not charged
+	Limits []Limit
 }
 
 // APIError is a non-2xx response from the API.
 type APIError struct {
 	Status  int
 	Message string // parsed from the {"error"|"message"} envelope, or the raw body
+
+	// Set on a rate-limited (429) response.
+	Limits  []Limit
+	RetryAt time.Time // when a request is admitted again; zero if the gateway did not say
 }
 
 func (e *APIError) Error() string {
 	if e.Message == "" {
 		return fmt.Sprintf("API error: HTTP %d %s", e.Status, http.StatusText(e.Status))
 	}
-	return fmt.Sprintf("API error (HTTP %d): %s", e.Status, e.Message)
+	return fmt.Sprintf("API error (HTTP %d): %s", e.Status, e.Message) + e.rateLimitDetail()
+}
+
+// rateLimitDetail names the window that is used up and when to retry, e.g.
+// ". All 5 requests per minute are used. Retry in 45s (at 15:21:04 UTC)".
+func (e *APIError) rateLimitDetail() string {
+	var detail string
+	for _, l := range e.Limits {
+		if l.UsedUp() {
+			detail = fmt.Sprintf(". All %d requests per %s are used", l.Max, l.window())
+		}
+	}
+	if !e.RetryAt.IsZero() {
+		detail += fmt.Sprintf(". Retry in %s (at %s)", formatWait(time.Until(e.RetryAt)), e.RetryAt.UTC().Format("15:04:05 MST"))
+	}
+	return detail
 }
 
 func newAPIError(status int, body []byte) *APIError {
@@ -187,25 +212,41 @@ func (c *Client) once(ctx context.Context, method, target string, payload []byte
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		return nil, -1, ErrRedirect
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return nil, retryDelay(resp.Header.Get("Retry-After")), newAPIError(resp.StatusCode, raw)
+		wait := retryAfter(resp.Header.Get("Retry-After"))
+		apiErr := newAPIError(resp.StatusCode, raw)
+		apiErr.Limits = limitsFrom(resp.Header)
+		if wait > 0 {
+			apiErr.RetryAt = time.Now().Add(wait)
+		}
+		return nil, retryDelay(wait), apiErr
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, -1, newAPIError(resp.StatusCode, raw)
 	}
-	return &Result{Body: raw, Credit: resp.Header.Get(creditHeader)}, -1, nil
+	return &Result{Body: raw, Credit: resp.Header.Get(creditHeader), Limits: limitsFrom(resp.Header)}, -1, nil
 }
 
-// retryDelay turns a Retry-After header (seconds) into a wait, defaulting
-// to one second and capping at ten so a hostile header cannot stall the CLI.
-func retryDelay(header string) time.Duration {
-	const (
-		fallback = time.Second
-		ceiling  = 10 * time.Second
-	)
+// retryAfter reads a Retry-After header (seconds); zero when the gateway
+// sent none or sent something else.
+func retryAfter(header string) time.Duration {
 	secs, err := strconv.Atoi(strings.TrimSpace(header))
 	if err != nil || secs <= 0 {
-		return fallback
+		return 0
 	}
-	return min(time.Duration(secs)*time.Second, ceiling)
+	return time.Duration(secs) * time.Second
+}
+
+// retryDelay decides how long to sleep before retrying a 429: the wait the
+// gateway asked for, one second when it asked for none, and no retry at all
+// (a negative delay) when the wait is past retryCeiling, since a retry before
+// then is rejected again.
+func retryDelay(wait time.Duration) time.Duration {
+	switch {
+	case wait <= 0:
+		return time.Second
+	case wait > retryCeiling:
+		return -1
+	}
+	return wait
 }
 
 // Credits reads the current credit balance for the token.

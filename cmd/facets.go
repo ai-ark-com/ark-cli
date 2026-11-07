@@ -10,6 +10,9 @@ import (
 // for flag names; cmd/filters_test.go checks that the flags together reach
 // every path of the request schema.
 func facetsFor(scope filterScope) []*facet {
+	if scope == jobScope {
+		return jobFacets()
+	}
 	var facets []*facet
 	if scope == peopleScope {
 		facets = append(facets, contactFacets()...)
@@ -212,6 +215,89 @@ func accountFacets(scope filterScope) []*facet {
 		{
 			name: "naics", usage: "NAICS code(s), e.g. 541511", sample: "541511",
 			plain: func(r *client.SearchRequest, f *client.PlainFilter) { account(r).NAICS = f },
+		},
+		{
+			name:   acct("mail-platform"),
+			usage:  "email platform(s) hosting the company's mail, e.g. google, microsoft; see 'ark catalog mail-platforms'",
+			sample: "google",
+			plain:  func(r *client.SearchRequest, f *client.PlainFilter) { mailStack(r).Platform = f },
+		},
+		{
+			name:   acct("mail-security"),
+			usage:  "email security gateway(s) in front of the company's mail, e.g. proofpoint; see 'ark catalog mail-security'",
+			sample: "proofpoint",
+			plain:  func(r *client.SearchRequest, f *client.PlainFilter) { mailStack(r).Security = f },
+		},
+	}
+}
+
+func jobFacets() []*facet {
+	return []*facet{
+		{
+			name: "title", usage: "job title(s) of the post", kind: matchedFacet, sample: "sales manager",
+			matched: func(r *client.SearchRequest, f *client.MatchFilter) { job(r).Title = f },
+		},
+		{
+			name: "description", usage: "word(s) or phrase(s) in the text of the post (word or smart match only)",
+			kind: matchedFacet, noStrict: true, sample: "cold calling",
+			matched: func(r *client.SearchRequest, f *client.MatchFilter) { job(r).Description = f },
+		},
+		{
+			name: "text", usage: "word(s) or phrase(s) in the job title or the text of the post (word or smart match only)",
+			kind: matchedFacet, noStrict: true, sample: "salesforce",
+			matched: func(r *client.SearchRequest, f *client.MatchFilter) { job(r).TitleOrDescription = f },
+		},
+		{
+			name: "location", usage: "where the job is: country, state, city, continent, or metro area",
+			kind: matchedFacet, sample: "Germany",
+			matched: func(r *client.SearchRequest, f *client.MatchFilter) { job(r).Location = f },
+		},
+		{
+			name: "employment-type", usage: "employment type(s), see 'ark catalog job-employment-types'",
+			enum: catalog.JobEmploymentTypeValues, sample: "full_time",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { job(r).EmploymentType = f },
+		},
+		{
+			name: "seniority", usage: "seniority level(s) of the post, see 'ark catalog job-seniority'",
+			enum: catalog.JobSeniorityLevels, sample: "mid_senior",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { job(r).Seniority = f },
+		},
+		{
+			name:   "industry",
+			usage:  "industry(ies) of the hiring company as shown on the post, see 'ark catalog job-industries'",
+			sample: "software development",
+			plain:  func(r *client.SearchRequest, f *client.PlainFilter) { job(r).Industries = f },
+		},
+		{
+			name:   "technology",
+			usage:  "technology name(s) or category(ies) mentioned in the post, see 'ark catalog job-technologies'",
+			sample: "Salesforce",
+			plain:  func(r *client.SearchRequest, f *client.PlainFilter) { job(r).Technologies = f },
+		},
+		{
+			name: "language", usage: "language(s) the post is written in, see 'ark catalog job-languages'", sample: "german",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { job(r).Language = &client.JobLanguage{Name: f} },
+		},
+		{
+			name: "id", usage: "job post id(s), the id of a result", sample: "4466524988",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { job(r).ID = f },
+		},
+		{
+			name: "company-id", usage: "AI-Ark company id(s) of the hiring company (from 'ark company search')",
+			ids: true, sample: sampleUUID,
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { hiringCompany(r).ID = f },
+		},
+		{
+			name: "company-domain", usage: "website domain(s) of the hiring company, e.g. sap.com", sample: "sap.com",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { hiringCompany(r).Domain = f },
+		},
+		{
+			name: "company-name", usage: "name(s) of the hiring company as shown on the post", kind: matchedFacet, sample: "SAP",
+			matched: func(r *client.SearchRequest, f *client.MatchFilter) { hiringCompany(r).Name = f },
+		},
+		{
+			name: "company-linkedin", usage: "LinkedIn URL(s) of the hiring company", sample: "https://www.linkedin.com/company/sap",
+			plain: func(r *client.SearchRequest, f *client.PlainFilter) { hiringCompany(r).LinkedIn = f },
 		},
 	}
 }

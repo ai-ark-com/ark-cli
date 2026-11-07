@@ -20,7 +20,7 @@ type AccountFilter struct {
 	ProductAndServices *MatchFilter    `json:"productAndServices,omitempty"`
 	SocialMedia        *PlainFilter    `json:"socialMedia,omitempty"`
 	Type               *PlainFilter    `json:"type,omitempty"`
-	FoundedYear        *YearFilter     `json:"foundedYear,omitempty"`
+	FoundedYear        *BandFilter     `json:"foundedYear,omitempty"`
 	EmployeeSize       *RangeFilter    `json:"employeeSize,omitempty"`
 	RetailSize         *RangeFilter    `json:"retailSize,omitempty"`
 	Revenue            *RangeFilter    `json:"revenue,omitempty"`
@@ -37,6 +37,15 @@ type AccountFilter struct {
 	// Employee finds companies that employ people matching a job role. It is
 	// accepted by company search only.
 	Employee *EmployeeFilter `json:"employee,omitempty"`
+	Mail     *MailFilter     `json:"mail,omitempty"`
+}
+
+// MailFilter targets companies by their email stack, detected from the MX
+// records of the company's domains. A company with several domains matches
+// when any of its domains does.
+type MailFilter struct {
+	Platform *PlainFilter `json:"platform,omitempty"` // provider that hosts the email
+	Security *PlainFilter `json:"security,omitempty"` // gateway that filters inbound mail
 }
 
 // LanguageFilter is the account-level operating-language filter: plain
@@ -202,17 +211,21 @@ type FollowerCounts struct {
 	Connections *RangeFilter `json:"connections,omitempty"`
 }
 
-// SearchRequest is the body shared by people search, preview, export, and
-// company search. Fields that only one endpoint accepts (LookalikeDomains,
-// Webhook) are omitted when empty.
+// SearchRequest is the body shared by people search, preview, export,
+// company search, and job post search. Fields that only one endpoint accepts
+// (LookalikeDomains, Webhook, Job, Company) are omitted when empty.
 type SearchRequest struct {
 	LookalikeDomains []string       `json:"lookalikeDomains,omitempty"`
 	Account          *AccountFilter `json:"account,omitempty"`
 	Contact          *ContactFilter `json:"contact,omitempty"`
 	Lists            *ListsFilter   `json:"lists,omitempty"`
-	Page             int            `json:"page"`
-	Size             int            `json:"size"`
-	Webhook          string         `json:"webhook,omitempty"`
+	// Job and Company are the two filter objects of job post search, which
+	// takes neither Account nor Contact.
+	Job     *JobFilter           `json:"job,omitempty"`
+	Company *HiringCompanyFilter `json:"company,omitempty"`
+	Page    int                  `json:"page"`
+	Size    int                  `json:"size"`
+	Webhook string               `json:"webhook,omitempty"`
 }
 
 // HasFilters reports whether the request narrows the result set at all. An
@@ -222,7 +235,7 @@ func (r *SearchRequest) HasFilters() bool {
 	if len(r.LookalikeDomains) > 0 {
 		return true
 	}
-	return !IsEmptyJSON(r.Account) || !IsEmptyJSON(r.Contact)
+	return !IsEmptyJSON(r.Account) || !IsEmptyJSON(r.Contact) || !IsEmptyJSON(r.Job) || !IsEmptyJSON(r.Company)
 }
 
 // Compact drops filter objects that carry no filters, so the wire body only
@@ -236,6 +249,12 @@ func (r *SearchRequest) Compact() *SearchRequest {
 	}
 	if IsEmptyJSON(r.Lists) {
 		r.Lists = nil
+	}
+	if IsEmptyJSON(r.Job) {
+		r.Job = nil
+	}
+	if IsEmptyJSON(r.Company) {
+		r.Company = nil
 	}
 	return r
 }
@@ -274,6 +293,7 @@ const (
 	PathPeoplePreview = "/v1/people/preview" // 1 credit per page
 	PathPeopleExport  = "/v1/people/export"  // async; 0.5 per person + 0.5 per found email
 	PathCompanySearch = "/v1/companies"      // 0.1 credits per result
+	PathJobPostSearch = "/v1/job-posts"      // 0.1 credits per result
 )
 
 // Search posts a search body unchanged to one of the Path* endpoints.

@@ -59,7 +59,7 @@ func TestCompanyRequestJSONShape(t *testing.T) {
 			Location:     plain([]string{"Germany"}, nil),
 			Technologies: matched(MatchWord, []string{"hubspot"}, []string{"salesforce"}),
 			Type:         plain([]string{"PRIVATELY_HELD"}, nil),
-			FoundedYear:  &YearFilter{Type: RangeTypeRange, Range: &Range{Start: f(2015)}},
+			FoundedYear:  &BandFilter{Type: RangeTypeRange, Range: &Range{Start: f(2015)}},
 			Keyword:      NewKeywords(NewKeywordValues(MatchSmart, []string{"DESCRIPTION"}, []string{"carbon accounting"}, nil), nil),
 		},
 		Size: 10,
@@ -72,6 +72,56 @@ func TestCompanyRequestJSONShape(t *testing.T) {
 		`"page":0,"size":10}`
 	if got != want {
 		t.Errorf("company body\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestJobPostRequestJSONShape(t *testing.T) {
+	t.Parallel()
+
+	req := &SearchRequest{
+		Job: &JobFilter{
+			Title:           matched(MatchWord, []string{"sales manager"}, []string{"intern"}),
+			Location:        matched(MatchWord, []string{"Germany"}, nil),
+			Seniority:       plain([]string{"mid_senior", "director"}, nil),
+			Technologies:    plain([]string{"Salesforce"}, nil),
+			YearlySalaryUSD: &BandFilter{Type: RangeTypeRange, Range: &Range{Start: f(80000), End: f(150000)}},
+			Language:        &JobLanguage{Name: plain([]string{"german"}, nil)},
+			HiringModel:     "DIRECT",
+			PostedAt:        &DayFilter{Type: RangeTypeRange, Range: &DayRange{Start: "2026-10-01"}},
+			ExpiredAt:       &DayFilter{Type: RangeTypeAll},
+		},
+		Company: &HiringCompanyFilter{Domain: plain(nil, []string{"sap.com"})},
+		Size:    25,
+	}
+	got := mustJSON(t, req)
+	want := `{"job":{"title":{"any":{"include":{"mode":"WORD","content":["sales manager"]},"exclude":{"mode":"WORD","content":["intern"]}}},` +
+		`"location":{"any":{"include":{"mode":"WORD","content":["Germany"]}}},` +
+		`"seniority":{"any":{"include":["mid_senior","director"]}},` +
+		`"technologies":{"any":{"include":["Salesforce"]}},` +
+		`"yearlySalaryUsd":{"type":"RANGE","range":{"start":80000,"end":150000}},` +
+		`"language":{"name":{"any":{"include":["german"]}}},"hiringModel":"DIRECT",` +
+		`"postedAt":{"type":"RANGE","range":{"start":"2026-10-01"}},"expiredAt":{"type":"ALL"}},` +
+		`"company":{"domain":{"any":{"exclude":["sap.com"]}}},"page":0,"size":25}`
+	if got != want {
+		t.Errorf("job post body\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestMailFilterJSONShape(t *testing.T) {
+	t.Parallel()
+
+	req := &SearchRequest{
+		Account: &AccountFilter{Mail: &MailFilter{
+			Platform: plain([]string{"google", "microsoft"}, nil),
+			Security: plain(nil, []string{"proofpoint"}),
+		}},
+		Size: 10,
+	}
+	got := mustJSON(t, req)
+	want := `{"account":{"mail":{"platform":{"any":{"include":["google","microsoft"]}},` +
+		`"security":{"any":{"exclude":["proofpoint"]}}}},"page":0,"size":10}`
+	if got != want {
+		t.Errorf("mail body\n got: %s\nwant: %s", got, want)
 	}
 }
 
@@ -119,6 +169,19 @@ func TestHasFiltersAndCompact(t *testing.T) {
 	}
 	if !(&SearchRequest{LookalikeDomains: []string{"raisin.com"}}).HasFilters() {
 		t.Error("lookalike search should count as filtered")
+	}
+	if !(&SearchRequest{Job: &JobFilter{HiringModel: "DIRECT"}}).HasFilters() {
+		t.Error("request with a job filter should report filters")
+	}
+	if !(&SearchRequest{Company: &HiringCompanyFilter{Domain: plain([]string{"sap.com"}, nil)}}).HasFilters() {
+		t.Error("request with a hiring company filter should report filters")
+	}
+	if (&SearchRequest{Job: &JobFilter{}, Company: &HiringCompanyFilter{}}).HasFilters() {
+		t.Error("empty job post sections should report no filters")
+	}
+	jobs := (&SearchRequest{Job: &JobFilter{HiringModel: "AGENCY"}, Company: &HiringCompanyFilter{}, Size: 10}).Compact()
+	if got, want := mustJSON(t, jobs), `{"job":{"hiringModel":"AGENCY"},"page":0,"size":10}`; got != want {
+		t.Errorf("compacted job post body: got %s, want %s", got, want)
 	}
 
 	req := (&SearchRequest{

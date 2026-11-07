@@ -12,13 +12,32 @@ import (
 
 // filterScope selects which filter groups a search command exposes: people
 // commands take contact filters plus company-level ("company-*") filters;
-// company search takes company-level filters under their short names.
+// company search takes company-level filters under their short names; job
+// post search takes its own job and hiring-company filters.
 type filterScope int
 
 const (
 	peopleScope filterScope = iota
 	companyScope
+	jobScope
 )
+
+// bodyKeys are the request sections that count as a filter for the scope.
+func (s filterScope) bodyKeys() []string {
+	if s == jobScope {
+		return []string{"job", "company"}
+	}
+	return []string{"account", "contact", "lookalikeDomains"}
+}
+
+// defaultMatch is the match mode sent when --match is not given: the API's
+// own default for the scope's endpoints.
+func (s filterScope) defaultMatch() string {
+	if s == jobScope {
+		return "word"
+	}
+	return "smart"
+}
 
 // facetKind is the wire shape of a list-valued facet.
 type facetKind int
@@ -39,6 +58,9 @@ type facet struct {
 	enum   []string // allowed values (normalised); nil for free text
 	ids    bool     // values must be AI-Ark UUIDs
 	sample string   // a valid example value; tests use it to exercise every path
+
+	// matched facets: the API refuses --match strict on this field.
+	noStrict bool
 
 	// keyword facets: the companion --<name>-source flag, its catalog, the
 	// default sources, and the API's cap on how many may be given.
@@ -100,6 +122,13 @@ type searchFlags struct {
 
 	lookalike   []string // company scope only
 	excludeList []string
+
+	// job post scalars (job scope)
+	salary      string
+	hiringModel string
+	posted      string
+	expires     string
+	collected   string
 }
 
 // searchPlan is the outcome of parsing the flags: either a typed request or
@@ -125,7 +154,11 @@ func (s *searchFlags) register(fs *pflag.FlagSet, scope filterScope) {
 		fs.StringVar(p, name, "", usage)
 	}
 
-	fs.StringVar(&s.match, "match", "smart", "text match mode for --title, --skill, --industry, ...: smart, word, or strict")
+	matchUsage := "text match mode for --title, --skill, --industry, ...: smart, word, or strict"
+	if scope == jobScope {
+		matchUsage = "text match mode for --title, --description, --text, --location, --company-name: word, smart, or strict"
+	}
+	fs.StringVar(&s.match, "match", scope.defaultMatch(), matchUsage)
 	fs.StringVar(&s.body, "body", "", "send this JSON request body instead of building one from flags (\"-\" for stdin)")
 	fs.BoolVar(&s.dryRun, "dry-run", false, "print the request body and exit without calling the API")
 	track("match")
@@ -145,6 +178,16 @@ func (s *searchFlags) register(fs *pflag.FlagSet, scope filterScope) {
 			slice(&f.sources, f.name+"-source", "sections searched by --"+f.name+" (default "+
 				joinValues(f.defaultSources)+"), see 'ark catalog "+f.sourceCatalog+"'")
 		}
+	}
+
+	// Job post search has no company, person or suppression-list flags.
+	if scope == jobScope {
+		str(&s.salary, "salary", "yearly salary in USD the post's range must overlap, as a band like 80k-150k or 100k+; or any / none")
+		str(&s.hiringModel, "hiring-model", "who posted the job: direct (the hiring company) or agency, see 'ark catalog hiring-models'")
+		str(&s.posted, "posted", "posted-date band as YYYY-MM-DD..YYYY-MM-DD (either side may be empty)")
+		str(&s.expires, "expires", "expiry-date band, same format as --posted; a start of today keeps jobs that are still open")
+		str(&s.collected, "collected", "band of the date AI-Ark first collected the post, same format as --posted")
+		return
 	}
 
 	if scope == peopleScope {
@@ -214,24 +257,51 @@ func (s *searchFlags) plan(cmd *cobra.Command, page, size, maxSize int) (*search
 	if err := s.buildFacets(req, mode); err != nil {
 		return nil, err
 	}
-	if err := s.buildAccountScalars(req); err != nil {
+	if s.scope == jobScope {
+		err = s.buildJobScalars(req)
+	} else {
+		err = s.buildProfileScalars(req)
+	}
+	if err != nil {
 		return nil, err
-	}
-	if s.scope == peopleScope {
-		if err := s.buildContactScalars(req); err != nil {
-			return nil, err
-		}
-	}
-	if req.Lists, err = s.lists(); err != nil {
-		return nil, err
-	}
-	if req.LookalikeDomains = splitCSV(s.lookalike); len(req.LookalikeDomains) > 5 {
-		return nil, usageErrorf("--lookalike takes at most 5 values")
 	}
 	if !req.Compact().HasFilters() {
 		return nil, errNoFilters
 	}
 	return &searchPlan{req: req}, nil
+}
+
+// buildProfileScalars sets everything of a people or company search that is
+// not a facet: scalar filters, suppression lists, and lookalike domains.
+func (s *searchFlags) buildProfileScalars(req *client.SearchRequest) error {
+	if err := s.buildAccountScalars(req); err != nil {
+		return err
+	}
+	if s.scope == peopleScope {
+		if err := s.buildContactScalars(req); err != nil {
+			return err
+		}
+	}
+	var err error
+	if req.Lists, err = s.lists(); err != nil {
+		return err
+	}
+	if req.LookalikeDomains = splitCSV(s.lookalike); len(req.LookalikeDomains) > 5 {
+		return usageErrorf("--lookalike takes at most 5 values")
+	}
+	return nil
+}
+
+// buildJobScalars sets the job post filters that are not value lists.
+func (s *searchFlags) buildJobScalars(req *client.SearchRequest) error {
+	var p parser
+	j := job(req)
+	j.YearlySalaryUSD = p.bandOrKind("salary", s.salary)
+	j.HiringModel = p.choice("hiring-model", catalog.HiringModelValues, s.hiringModel)
+	j.PostedAt = p.days("posted", s.posted)
+	j.ExpiredAt = p.days("expires", s.expires)
+	j.Created = p.days("collected", s.collected)
+	return p.err
 }
 
 // checkCompanions rejects flags that only modify another flag which was not
@@ -271,6 +341,9 @@ func (s *searchFlags) buildFacets(req *client.SearchRequest, mode string) error 
 		}
 		if empty {
 			continue
+		}
+		if f.noStrict && mode == client.MatchStrict {
+			return usageErrorf("--match strict is not supported with --%s; use word or smart", f.name)
 		}
 		inc, exc, allInc, allExc := clean[0], clean[1], clean[2], clean[3]
 		switch f.kind {
@@ -332,7 +405,7 @@ func (s *searchFlags) buildAccountScalars(req *client.SearchRequest) error {
 	a.EmployeeSize = client.Ranges(p.bands("employees", s.employees))
 	a.RetailSize = client.Ranges(p.bands("retail-locations", s.retailLocations))
 	a.Revenue = p.rangeOrKind("revenue", s.revenue)
-	a.FoundedYear = p.year("founded", s.founded)
+	a.FoundedYear = p.bandOrKind("founded", s.founded)
 	a.GeoLocation = p.geo(s.near, s.radius, s.radiusUnit)
 	a.Funding = s.funding(&p)
 	a.Metric = s.metrics(&p)
@@ -456,7 +529,7 @@ func (s *searchFlags) rawPlan(cmd *cobra.Command, page, size, maxSize int) (*sea
 	if err := setJSONField(body, "size", size, cmd.Flags().Changed("size")); err != nil {
 		return nil, err
 	}
-	if err := validateRawBody(body, maxSize); err != nil {
+	if err := validateRawBody(body, s.scope.bodyKeys(), maxSize); err != nil {
 		return nil, err
 	}
 	merged, err := json.Marshal(body)
@@ -466,10 +539,11 @@ func (s *searchFlags) rawPlan(cmd *cobra.Command, page, size, maxSize int) (*sea
 	return &searchPlan{raw: merged}, nil
 }
 
-// validateRawBody applies the billing guards to a --body request.
-func validateRawBody(body map[string]json.RawMessage, maxSize int) error {
+// validateRawBody applies the billing guards to a --body request; filterKeys
+// are the sections of which at least one must carry a filter.
+func validateRawBody(body map[string]json.RawMessage, filterKeys []string, maxSize int) error {
 	filtered := false
-	for _, key := range []string{"account", "contact", "lookalikeDomains"} {
+	for _, key := range filterKeys {
 		if raw, ok := body[key]; ok && !client.IsEmptyJSON(raw) {
 			filtered = true
 		}
@@ -502,6 +576,28 @@ func contact(r *client.SearchRequest) *client.ContactFilter {
 		r.Contact = &client.ContactFilter{}
 	}
 	return r.Contact
+}
+
+func mailStack(r *client.SearchRequest) *client.MailFilter {
+	a := account(r)
+	if a.Mail == nil {
+		a.Mail = &client.MailFilter{}
+	}
+	return a.Mail
+}
+
+func job(r *client.SearchRequest) *client.JobFilter {
+	if r.Job == nil {
+		r.Job = &client.JobFilter{}
+	}
+	return r.Job
+}
+
+func hiringCompany(r *client.SearchRequest) *client.HiringCompanyFilter {
+	if r.Company == nil {
+		r.Company = &client.HiringCompanyFilter{}
+	}
+	return r.Company
 }
 
 func employee(r *client.SearchRequest) *client.EmployeeFilter {

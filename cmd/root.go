@@ -55,6 +55,7 @@ each command.
   ark people preview --location Germany --seniority c_suite
   ark people search  --location Germany --seniority c_suite --size 25
   ark company search --industry "software development" --employees 51-200
+  ark job-posts search --title "sales manager" --location Germany
   ark catalog seniority                allowed values of a filter
   ark credits                          balance`,
 		SilenceUsage:  true,
@@ -76,6 +77,7 @@ each command.
 		newAuthCmd(build),
 		newPeopleCmd(build),
 		newCompanyCmd(build),
+		newJobPostsCmd(build),
 		newListsCmd(build),
 		newCatalogCmd(build),
 		newCreditsCmd(build),
