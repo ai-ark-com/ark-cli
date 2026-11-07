@@ -25,7 +25,7 @@ put `ark` on your `PATH`:
 
 ```bash
 # Linux / macOS. Archives: ark_<version>_<linux|darwin>_<amd64|arm64>.tar.gz
-v=1.1.0
+v=1.1.1
 curl -sLO https://github.com/ai-ark-com/ark-cli/releases/download/$v/ark_${v}_linux_amd64.tar.gz
 curl -sLO https://github.com/ai-ark-com/ark-cli/releases/download/$v/checksums.txt
 sha256sum --check --ignore-missing checksums.txt

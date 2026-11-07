@@ -1,6 +1,6 @@
 module github.com/ai-ark-com/ark-cli
 
-go 1.26.8
+go 1.26.10
 
 require (
 	github.com/spf13/cobra v1.10.2
